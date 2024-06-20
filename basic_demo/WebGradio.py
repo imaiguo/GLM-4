@@ -6,9 +6,16 @@ allowing users to interact with the model through a chat-like interface.
 """
 
 import os
+
+from loguru import logger
 from pathlib import Path
 from threading import Thread
 from typing import Union
+from dotenv import load_dotenv
+
+load_dotenv()
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 import gradio as gr
 import torch
@@ -24,15 +31,25 @@ from transformers import (
     TextIteratorStreamer
 )
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-os.environ['MODEL_PATH'] = '/opt/Data/ModelWeight/THUDM/glm-4-9b-chat'
+BindLocalIP = os.getenv('LocalIP')
+BindPort = os.getenv('BindPort')
+GradioUser = os.getenv('GradioUser')
+GradioPassword = os.getenv('GradioPassword')
 
+print(f"BindLocalIP: {BindLocalIP}")
+print(f"BindPort: {BindPort}")
+print(f"GradioUser: {GradioUser}")
+print(f"GradioPassword: {GradioPassword}")
+
+os.environ['MODEL_PATH'] = '/opt/Data/ModelWeight/THUDM/glm-4-9b-chat'
+Device = 'cuda'
 ModelType = Union[PreTrainedModel, PeftModelForCausalLM]
 TokenizerType = Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
 
 MODEL_PATH = os.environ.get('MODEL_PATH', 'THUDM/glm-4-9b-chat')
 TOKENIZER_PATH = os.environ.get("TOKENIZER_PATH", MODEL_PATH)
 
+PROMPT = "You are Intelligent Customer Service Blue, carefully analyzing the user's input and providing detailed and accurate answers.你是智能客服小蓝，仔细分析用户的输入，并作详细又准确的回答，记住使用中文回答问题。"
 
 def _resolve_path(path: Union[str, Path]) -> Path:
     return Path(path).expanduser().resolve()
@@ -43,12 +60,12 @@ def load_model_and_tokenizer(
     model_dir = _resolve_path(model_dir)
     if (model_dir / 'adapter_config.json').exists():
         model = AutoPeftModelForCausalLM.from_pretrained(
-            model_dir, trust_remote_code=trust_remote_code, device_map='auto'
+            model_dir, trust_remote_code=trust_remote_code, device_map=Device
         )
         tokenizer_dir = model.peft_config['default'].base_model_name_or_path
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            model_dir, trust_remote_code=trust_remote_code, device_map='auto'
+            model_dir, trust_remote_code=trust_remote_code, device_map=Device
         )
         tokenizer_dir = model_dir
     tokenizer = AutoTokenizer.from_pretrained(
@@ -56,9 +73,7 @@ def load_model_and_tokenizer(
     )
     return model, tokenizer
 
-
 model, tokenizer = load_model_and_tokenizer(MODEL_PATH, trust_remote_code=True)
-
 
 class StopOnTokens(StoppingCriteria):
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
@@ -101,18 +116,20 @@ def parse_text(text):
     return text
 
 
-def predict(history, prompt, max_length, top_p, temperature):
+def predict(history):
     stop = StopOnTokens()
     messages = []
-    if prompt:
-        messages.append({"role": "system", "content": prompt})
+    if PROMPT:
+        messages.append({"role": "system", "content": PROMPT})
     for idx, (user_msg, model_msg) in enumerate(history):
-        # if prompt and idx == 0:
+        # if PROMPT and idx == 0:
         #     continue
         if idx == len(history) - 1 and not model_msg:
+            logger.debug(f"input->:{user_msg}")
             messages.append({"role": "user", "content": user_msg})
             break
         if user_msg:
+            logger.debug(f"input->:{user_msg}")
             messages.append({"role": "user", "content": user_msg})
         if model_msg:
             messages.append({"role": "assistant", "content": model_msg})
@@ -125,56 +142,46 @@ def predict(history, prompt, max_length, top_p, temperature):
     generate_kwargs = {
         "input_ids": model_inputs,
         "streamer": streamer,
-        "max_new_tokens": max_length,
+        "max_new_tokens": 8192,
         "do_sample": True,
-        "top_p": top_p,
-        "temperature": temperature,
+        "top_p": 0.8,
+        "temperature": 0.6,
         "stopping_criteria": StoppingCriteriaList([stop]),
         "repetition_penalty": 1.2,
         "eos_token_id": model.config.eos_token_id,
     }
     t = Thread(target=model.generate, kwargs=generate_kwargs)
     t.start()
+    print("answer->:", end='', flush=True)
     for new_token in streamer:
         if new_token:
             history[-1][1] += new_token
+            print(new_token.strip(), end='', flush=True)
         yield history
 
-
-with gr.Blocks() as demo:
-    gr.HTML("""<h1 align="center">GLM-4-9B Gradio Simple Chat Demo</h1>""")
-    chatbot = gr.Chatbot()
+with gr.Blocks(title = "智能客服小蓝", css="footer {visibility: hidden}")  as demo:
+    # gr.HTML("""<h1 align="center">GLM-4-9B 聊天演示</h1>""")
+    chatbot = gr.Chatbot(
+        [],
+        elem_id="chatbot",
+        bubble_full_width=False,
+        height=800,
+        show_copy_button = False,
+        layout= "bubble",
+        avatar_images=("./image/Einstein.jpg", "./image/openai.png"))
 
     with gr.Row():
-        with gr.Column(scale=3):
-            with gr.Column(scale=12):
-                user_input = gr.Textbox(show_label=False, placeholder="Input...", lines=10, container=False)
-            with gr.Column(min_width=32, scale=1):
-                submitBtn = gr.Button("Submit")
-        with gr.Column(scale=1):
-            prompt_input = gr.Textbox(show_label=False, placeholder="Prompt", lines=10, container=False)
-            pBtn = gr.Button("Set Prompt")
-        with gr.Column(scale=1):
-            emptyBtn = gr.Button("Clear History")
-            max_length = gr.Slider(0, 32768, value=8192, step=1.0, label="Maximum length", interactive=True)
-            top_p = gr.Slider(0, 1, value=0.8, step=0.01, label="Top P", interactive=True)
-            temperature = gr.Slider(0.01, 1, value=0.6, step=0.01, label="Temperature", interactive=True)
+        with gr.Column(scale=9):
+            user_input = gr.Textbox(show_label=False, placeholder="请输入您的问题,刷新页面可清除历史", lines=1, container=False)
 
+        with gr.Column(min_width=1, scale=1):
+            submitBtn = gr.Button("提交", variant="primary")
 
     def user(query, history):
         return "", history + [[parse_text(query), ""]]
 
-
-    def set_prompt(prompt_text):
-        return [[parse_text(prompt_text), "成功设置prompt"]]
-
-
-    pBtn.click(set_prompt, inputs=[prompt_input], outputs=chatbot)
-
-    submitBtn.click(user, [user_input, chatbot], [user_input, chatbot], queue=False).then(
-        predict, [chatbot, prompt_input, max_length, top_p, temperature], chatbot
-    )
-    emptyBtn.click(lambda: (None, None), None, [chatbot, prompt_input], queue=False)
+    submitBtn.click(user, [user_input, chatbot], [user_input, chatbot], queue=False).then(predict, [chatbot], chatbot)
+    user_input.submit(user, [user_input, chatbot], [user_input, chatbot], queue=False).then(predict, [chatbot], chatbot)
 
 demo.queue()
-demo.launch(server_name="0.0.0.0", server_port=8000, inbrowser=True, share=True)
+demo.launch(server_name=BindLocalIP, server_port=int(BindPort), inbrowser=False, share=False)
