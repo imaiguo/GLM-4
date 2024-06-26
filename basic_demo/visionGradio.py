@@ -1,15 +1,3 @@
-"""
-This script creates a Gradio demo with a Transformers backend for the glm-4v-9b model, allowing users to interact with the model through a Gradio web UI.
-
-Usage:
-- Run the script to start the Gradio server.
-- Interact with the model via the web UI.
-
-Requirements:
-- Gradio package
-  - Type `pip install gradio` to install Gradio.
-"""
-
 import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
@@ -24,8 +12,7 @@ from transformers import (
     TextIteratorStreamer, AutoModel, BitsAndBytesConfig
 )
 from PIL import Image
-import requests
-from io import BytesIO
+from loguru import logger
 
 MODEL_PATH = "/opt/Data/ModelWeight/THUDM/glm-4v-9b"
 
@@ -34,13 +21,6 @@ tokenizer = AutoTokenizer.from_pretrained(
     trust_remote_code=True,
     encode_special_tokens=True
 )
-
-# model = AutoModel.from_pretrained(
-#     MODEL_PATH,
-#     trust_remote_code=True,
-#     device_map="auto",
-#     torch_dtype=torch.bfloat16
-# ).eval()
 
 # int4量化
 model = AutoModel.from_pretrained(
@@ -60,16 +40,15 @@ class StopOnTokens(StoppingCriteria):
                 return True
         return False
 
-def get_image(image_path=None, image_url=None):
+def get_image(image_path=None):
     if image_path:
+        logger.debug(f"image_path:[{image_path}]")
         return Image.open(image_path).convert("RGB")
-    elif image_url:
-        response = requests.get(image_url)
-        return Image.open(BytesIO(response.content)).convert("RGB")
     return None
 
-def chatbot(image_path=None, image_url=None, assistant_prompt=""):
-    image = get_image(image_path, image_url)
+def chatbot(image_path=None, assistant_prompt=""):
+    logger.debug(f"input->:{assistant_prompt}")
+    image = get_image(image_path)
 
     messages = [
         {"role": "assistant", "content": assistant_prompt},
@@ -111,25 +90,26 @@ def chatbot(image_path=None, image_url=None, assistant_prompt=""):
         if new_token:
             response += new_token
 
+    logger.debug(f"response->:{response}")
     return image, response.strip()
 
-with gr.Blocks() as demo:
-    demo.title = "GLM-4V-9B Image Recognition Demo"
-    demo.description = """
-    This demo uses the GLM-4V-9B model to got image infomation.
-    """
+with gr.Blocks(css="footer {visibility: hidden}") as demo:
+    demo.title = "4V-9B 图像识别演示"
     with gr.Row():
         with gr.Column():
-            image_path_input = gr.File(label="Upload Image (High-Priority)", type="filepath")
-            image_url_input = gr.Textbox(label="Image URL (Low-Priority)")
-            assistant_prompt_input = gr.Textbox(label="Assistant Prompt (You Can Change It)", value="这是什么？")
-            submit_button = gr.Button("Submit")
-        with gr.Column():
-            chatbot_output = gr.Textbox(label="GLM-4V-9B Model Response")
-            image_output = gr.Image(label="Image Preview")
+            image_path_input = gr.File(label="图片上传", type="filepath")
+            image_output = gr.Image(label="图片预览")
 
-    submit_button.click(chatbot,
-                        inputs=[image_path_input, image_url_input, assistant_prompt_input],
-                        outputs=[image_output, chatbot_output])
+        with gr.Column():
+            chatbot_output = gr.Textbox(label="4V-9B模型回答:", lines=20)
+            with gr.Row():
+                with gr.Column(scale=9):
+                    assistant_prompt_input = gr.Textbox(show_label=False, placeholder="请输入您的问题,刷新页面可清除历史", lines=1, container=False)
+
+                with gr.Column(min_width=1, scale=1):
+                    submit_button = gr.Button("提交", min_width=1, scale=1, variant="primary")
+
+    submit_button.click(chatbot, inputs=[image_path_input, assistant_prompt_input], outputs=[image_output, chatbot_output])
+    assistant_prompt_input.submit(chatbot, inputs=[image_path_input, assistant_prompt_input], outputs=[image_output, chatbot_output])
 
 demo.launch(server_name="0.0.0.0", server_port=8000, inbrowser=False, share=False)

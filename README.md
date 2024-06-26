@@ -19,9 +19,15 @@
 ## 3 启动服务
 
 ```bash
+>
 > python basic_demo/openai_api_server.py
 > python basic_demo/openai_api_server_transformer.py
 > python basic_demo/WebGradio.py
+>
+> python basic_demo/visionGradio.py
+> python basic_demo/trans_cli_vision_demo.py
+> python basic_demo/trans_cli_vision_gradio_demo.py
+>
 > jupyter notebook --no-browser --port 7000 --ip=192.168.2.199
 ```
 

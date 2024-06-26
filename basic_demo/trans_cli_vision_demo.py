@@ -11,6 +11,9 @@ ensuring that the CLI interface displays formatted text correctly.
 """
 
 import os
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+
 import torch
 from threading import Thread
 from transformers import (
@@ -22,28 +25,30 @@ from transformers import (
 
 from PIL import Image
 
-MODEL_PATH = os.environ.get('MODEL_PATH', 'THUDM/glm-4v-9b')
+MODEL_PATH = "/opt/Data/ModelWeight/THUDM/glm-4v-9b"
 
 tokenizer = AutoTokenizer.from_pretrained(
     MODEL_PATH,
     trust_remote_code=True,
     encode_special_tokens=True
 )
-model = AutoModel.from_pretrained(
-    MODEL_PATH,
-    trust_remote_code=True,
-    device_map="auto",
-    torch_dtype=torch.bfloat16
-).eval()
 
-## For INT4 inference
 # model = AutoModel.from_pretrained(
 #     MODEL_PATH,
 #     trust_remote_code=True,
-#     quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-#     torch_dtype=torch.bfloat16,
-#     low_cpu_mem_usage=True
+#     device_map="auto",
+#     torch_dtype=torch.float32,
 # ).eval()
+
+## For INT4 inference
+model = AutoModel.from_pretrained(
+    MODEL_PATH,
+    trust_remote_code=True,
+    device_map="auto", # 多卡部署
+    quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+    torch_dtype=torch.float32,
+    low_cpu_mem_usage=True
+).eval()
 
 class StopOnTokens(StoppingCriteria):
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
@@ -82,10 +87,13 @@ if __name__ == "__main__":
                     messages[-1].update({"image": image})
                     uploaded = True
                 break
+
             if user_msg:
                 messages.append({"role": "user", "content": user_msg})
+
             if model_msg:
                 messages.append({"role": "assistant", "content": model_msg})
+
         model_inputs = tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
@@ -93,6 +101,7 @@ if __name__ == "__main__":
             return_tensors="pt",
             return_dict=True
         ).to(next(model.parameters()).device)
+
         streamer = TextIteratorStreamer(
             tokenizer=tokenizer,
             timeout=60,
