@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 import gradio as gr
 import torch
@@ -41,12 +41,11 @@ print(f"BindPort: {BindPort}")
 print(f"GradioUser: {GradioUser}")
 print(f"GradioPassword: {GradioPassword}")
 
-os.environ['MODEL_PATH'] = '/opt/Data/ModelWeight/THUDM/glm-4-9b-chat'
-Device = 'cuda'
+Device = 'auto'
 ModelType = Union[PreTrainedModel, PeftModelForCausalLM]
 TokenizerType = Union[PreTrainedTokenizer, PreTrainedTokenizerFast]
 
-MODEL_PATH = os.environ.get('MODEL_PATH', 'THUDM/glm-4-9b-chat')
+MODEL_PATH = '/opt/Data/ModelWeight/THUDM/glm-4-9b-chat'
 TOKENIZER_PATH = os.environ.get("TOKENIZER_PATH", MODEL_PATH)
 
 PROMPT = "You are Intelligent Customer Service Blue, carefully analyzing the user's input and providing detailed and accurate answers.你是智能客服小蓝，仔细分析用户的输入，并作详细又准确的回答，记住使用中文回答问题。"
